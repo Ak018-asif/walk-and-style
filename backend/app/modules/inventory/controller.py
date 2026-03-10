@@ -1,45 +1,62 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.inventory.schema import InventoryLogCreateSchema, InventoryLogSchema
+from app.core.dependencies import get_current_user
+from app.db.session import get_db
+from app.modules.auth.model import User
+from app.modules.inventory.schema import (
+    InventoryLogCreate,
+    InventoryLogResponse,
+)
 from app.modules.inventory.service import InventoryService
-from core.dependencies import get_db, get_current_user
-from models.models import User
 
-router = APIRouter(prefix="/inventory", tags=["inventory"])
+router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 
-@router.post("/log", response_model=InventoryLogSchema)
-async def log_inventory(
-    log_data: InventoryLogCreateSchema,
+@router.post("/log", response_model=InventoryLogResponse, status_code=status.HTTP_201_CREATED)
+async def create_inventory_log(
+    data: InventoryLogCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
-    # Only admins should normally perform inventory adjustments
+    """Create a new inventory log entry (auth required)."""
     try:
-        log = await InventoryService.create_log(
-            db,
-            product_variant_id=log_data.product_variant_id,
-            change_type=log_data.change_type,
-            quantity_change=log_data.quantity_change,
-            reference_id=log_data.reference_id,
-        )
-        return log
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        return await InventoryService.create(db, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.get("/variant/{variant_id}", response_model=list[InventoryLogSchema])
-async def get_variant_logs(
+@router.get("/log", response_model=list[InventoryLogResponse])
+async def get_all_inventory_logs(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Get all inventory logs (auth required)."""
+    return await InventoryService.get_all(db, skip, limit)
+
+
+@router.get("/log/{log_id}", response_model=InventoryLogResponse)
+async def get_inventory_log(
+    log_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Get a specific inventory log (auth required)."""
+    try:
+        return await InventoryService.get_by_id(db, log_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/variant/{variant_id}", response_model=list[InventoryLogResponse])
+async def get_variant_inventory_logs(
     variant_id: str,
     skip: int = 0,
-    limit: int = 20,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
 ):
-    logs = await InventoryService.get_for_variant(db, variant_id, skip, limit)
-    return logs
-
-
-@router.get("/", response_model=list[InventoryLogSchema])
-async def get_all_logs(skip: int = 0, limit: int = 50, db: AsyncSession = Depends(get_db)):
-    return await InventoryService.get_all(db, skip, limit)
+    """Get inventory logs for a specific variant (auth required)."""
+    return await InventoryService.get_by_variant(db, variant_id, skip, limit)

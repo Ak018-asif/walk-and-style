@@ -1,1 +1,3 @@
-from .controller import router
+from app.modules.products.controller import router
+
+__all__ = ["router"]

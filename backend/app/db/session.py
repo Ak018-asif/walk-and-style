@@ -4,20 +4,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:1234@localhost:5432/walk_n_style"
-)
+from app.core.config import settings
 
 # ── Engine ────────────────────────────────────────────────────────────────────
 engine = create_async_engine(
-    DATABASE_URL,
-    echo=True,       # Set False in production — shows SQL logs in terminal
+    settings.DATABASE_URL,
+    echo=False,
     pool_size=10,
     max_overflow=20,
 )
@@ -26,14 +19,14 @@ engine = create_async_engine(
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False,   # Important: prevents "DetachedInstanceError"
+    expire_on_commit=False,
 )
 
 # ── Base class for all ORM models ─────────────────────────────────────────────
 class Base(DeclarativeBase):
     pass
 
-# ── FastAPI dependency — one session per request ──────────────────────────────
+# ── FastAPI dependency ────────────────────────────────────────────────────────
 async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         try:

@@ -1,72 +1,78 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
+from app.db.session import get_db
+from app.modules.auth.model import User
 from app.modules.orders.schema import (
     OrderCreate,
     OrderResponse,
-    OrderListResponse,
     OrderStatusUpdate,
 )
 from app.modules.orders.service import OrderService
-# from app.modules.users.schema import AddressSchema  # unused
-from core.dependencies import get_db, get_current_user
-from models.models import User
 
-router = APIRouter(prefix="/orders", tags=["orders"])
+router = APIRouter(prefix="/orders", tags=["Orders"])
 
 
-@router.post("/", response_model=OrderResponse)
+@router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
-    order_data: OrderCreate,
+    data: OrderCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Create a new order (auth required)."""
     try:
-        order = await OrderService.create(
-            db,
-            user_id=current_user.id,
-            shipping_address_id=order_data.shipping_address_id,
-            items=[item.dict() for item in order_data.items],
-        )
-        return order
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        return await OrderService.create(db, current_user.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.get("/", response_model=OrderListResponse)
-async def list_orders(skip: int = 0, limit: int = 20, db: AsyncSession = Depends(get_db)):
-    orders = await OrderService.get_all(db, skip, limit)
-    return {"orders": orders}
+@router.get("", response_model=list[OrderResponse])
+async def get_user_orders(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get orders for current user (auth required)."""
+    return await OrderService.get_by_user(db, current_user.id)
 
 
-@router.get("/my", response_model=OrderListResponse)
-async def my_orders(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    orders = await OrderService.get_by_user(db, current_user.id)
-    return {"orders": orders}
+# IMPORTANT: This route MUST come BEFORE /{order_id}
+@router.get("/all", response_model=list[OrderResponse])
+async def get_all_orders(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Get all orders (admin operation, auth required)."""
+    return await OrderService.get_all(db, skip, limit)
 
 
 @router.get("/{order_id}", response_model=OrderResponse)
-async def get_order(order_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_order(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a specific order (auth required)."""
     try:
-        order = await OrderService.get_by_id(db, order_id, current_user.id)
-        return order
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        return await OrderService.get_by_id(db, order_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.patch("/{order_id}/status", response_model=OrderResponse)
 async def update_order_status(
     order_id: str,
-    status_update: OrderStatusUpdate,
+    data: OrderStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
-    # in a real app, we'd check admin rights for status change
+    """Update order status (auth required)."""
     try:
-        order = await OrderService.update_status(db, order_id, status_update.status)
-        return order
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        return await OrderService.update_status(db, order_id, data.status)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/{order_id}/cancel", response_model=OrderResponse)
@@ -75,8 +81,8 @@ async def cancel_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Cancel an order and restore stock (auth required)."""
     try:
-        order = await OrderService.cancel(db, order_id, current_user.id)
-        return order
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        return await OrderService.cancel(db, order_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
